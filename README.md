@@ -77,7 +77,7 @@ GROQ_API_KEY=<your_API_key>
 
 4. Clone the repository and install:
 ```sh
-git clone --depth 1 https://github.com/imaginalnika/xhisper.git
+git clone --depth 1 https://github.com/FRAZ5094/xhisper.git
 cd xhisper && make
 sudo make install
 ```
@@ -195,6 +195,10 @@ Use `output-mode : paste` for fast long-form dictation. Use `output-mode : type`
 ## macOS
 
 The Linux xhisper app does not run directly on macOS because it depends on PipeWire, `/dev/uinput`, and Linux desktop keybinds. The local `whisper.cpp` transcription approach is portable, though. See [`docs/macos-local-whisper.md`](docs/macos-local-whisper.md) for an equivalent macOS workflow using `ffmpeg`, `pbcopy`, and a hotkey tool.
+
+## Windows
+
+The Linux xhisper app does not run directly on Windows because it depends on PipeWire and `/dev/uinput`. `whisper.cpp` itself can run on Windows, and the same dictation workflow can be built with Windows audio capture, clipboard paste, and a hotkey tool. See [`docs/windows-local-whisper.md`](docs/windows-local-whisper.md).
 
 ## Troubleshooting
 
