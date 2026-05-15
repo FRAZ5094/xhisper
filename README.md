@@ -6,39 +6,41 @@
 
 Dictation at cursor for Linux.
 
+This fork can transcribe locally with [`whisper.cpp`](https://github.com/ggml-org/whisper.cpp), so a Groq API key is optional.
+
 ## Installation
 
 ### Dependencies
 
 <details>
 <summary>Arch Linux / Manjaro</summary>
-<pre><code>sudo pacman -S pipewire jq curl ffmpeg gcc</code></pre>
+<pre><code>sudo pacman -S pipewire jq curl ffmpeg gcc make cmake git bc</code></pre>
 </details>
 
 <details>
 <summary>Debian / Ubuntu / Linux Mint</summary>
 <pre><code>sudo apt update
-sudo apt install pipewire jq curl ffmpeg gcc</code></pre>
+sudo apt install pipewire jq curl ffmpeg gcc make cmake git bc</code></pre>
 </details>
 
 <details>
 <summary>Fedora / RHEL / AlmaLinux / Rocky</summary>
-<pre><code>sudo dnf install -y pipewire pipewire-utils jq curl ffmpeg gcc</code></pre>
+<pre><code>sudo dnf install -y pipewire pipewire-utils jq curl ffmpeg gcc make cmake git bc</code></pre>
 </details>
 
 <details>
 <summary>OpenSUSE (Leap / Tumbleweed)</summary>
 <pre><code>sudo zypper refresh
-sudo zypper install pipewire jq curl ffmpeg gcc</code></pre>
+sudo zypper install pipewire jq curl ffmpeg gcc make cmake git bc</code></pre>
 </details>
 
 <details>
 <summary>Void Linux</summary>
 <pre><code>sudo xbps-install -S
-sudo xbps-install pipewire jq curl ffmpeg gcc</code></pre>
+sudo xbps-install pipewire jq curl ffmpeg gcc make cmake git bc</code></pre>
 </details>
 
-**Note:** `wl-clipboard` (Wayland) or `xclip` (X11) required for non-ASCII but usually pre-installed.
+**Note:** `wl-clipboard` (Wayland) or `xclip` (X11) is required for clipboard paste output.
 
 ### Setup
 
@@ -56,19 +58,31 @@ groups
 
 You should see `input` in the output.
 
-2. **Get a Groq API key** from [console.groq.com](https://console.groq.com) (free tier available) and add to `~/.env`:
+2. **Local transcription with whisper.cpp**:
+```sh
+mkdir -p ~/.local/opt ~/.local/share/xhisper/models
+git clone https://github.com/ggml-org/whisper.cpp ~/.local/opt/whisper.cpp
+cmake -S ~/.local/opt/whisper.cpp -B ~/.local/opt/whisper.cpp/build -DCMAKE_BUILD_TYPE=Release
+cmake --build ~/.local/opt/whisper.cpp/build -j"$(nproc)" --config Release
+~/.local/opt/whisper.cpp/models/download-ggml-model.sh base.en
+ln -sf ~/.local/opt/whisper.cpp/models/ggml-base.en.bin ~/.local/share/xhisper/models/ggml-base.en.bin
+```
+
+For detailed Linux setup notes, see [`docs/linux-local-whisper.md`](docs/linux-local-whisper.md).
+
+3. **Optional Groq API key** from [console.groq.com](https://console.groq.com) if you set `transcription-backend : groq`:
 ```sh
 GROQ_API_KEY=<your_API_key>
 ```
 
-3. Clone the repository and install:
+4. Clone the repository and install:
 ```sh
 git clone --depth 1 https://github.com/imaginalnika/xhisper.git
 cd xhisper && make
 sudo make install
 ```
 
-4. Bind `xhisper` binary to your favorite key:
+5. Bind `xhisper` binary to your favorite key:
 
 <details>
 <summary>keyd</summary>
@@ -103,7 +117,7 @@ bindsym $mod+d exec xhisper
 <summary>Hyprland</summary>
 
 ```
-bind = $mainMod, D, exec, xhisper
+bindr = $mainMod, d, exec, /home/YOUR_USER/.local/bin/xhisper
 ```
 </details>
 
@@ -136,7 +150,7 @@ Simply run `xhisper` twice (via your favorite keybinding):
 - **First run**: Starts recording
 - **Second run**: Stops and transcribes
 
-The transcription will be typed at your cursor position.
+The transcription will be pasted or typed at your cursor position.
 
 **View logs:**
 ```sh
@@ -165,9 +179,26 @@ mkdir -p ~/.config/xhisper
 cp default_xhisperrc ~/.config/xhisper/xhisperrc
 ```
 
+Useful local transcription settings:
+
+```ini
+transcription-backend : local
+whisper-cpp-binary    : ~/.local/opt/whisper.cpp/build/bin/whisper-cli
+whisper-cpp-model     : ~/.local/share/xhisper/models/ggml-base.en.bin
+whisper-cpp-language  : en
+output-mode           : paste
+paste-chord           : auto
+```
+
+Use `output-mode : paste` for fast long-form dictation. Use `output-mode : type` to restore character-by-character typing.
+
+## macOS
+
+The Linux xhisper app does not run directly on macOS because it depends on PipeWire, `/dev/uinput`, and Linux desktop keybinds. The local `whisper.cpp` transcription approach is portable, though. See [`docs/macos-local-whisper.md`](docs/macos-local-whisper.md) for an equivalent macOS workflow using `ffmpeg`, `pbcopy`, and a hotkey tool.
+
 ## Troubleshooting
 
-**Terminal Applications**: Clipboard paste uses Ctrl+V, which doesn't work in terminal emulators (they require Ctrl+Shift+V). Temporary workaround is to remap Ctrl+V to paste in your terminal emulator's settings. Note that *this limitation only affects international/Unicode characters*. ASCII characters (a-z, A-Z, 0-9, punctuation) are typed directly and doesn't care whether terminal or not.
+**Terminal Applications**: With `paste-chord : auto`, common terminal emulators use Ctrl+Shift+V and other apps use Ctrl+V. If detection is wrong, set `paste-chord : ctrl-v` or `paste-chord : ctrl-shift-v`.
 
 **Non-ASCII Transcription**: Increase non-ascii-*-delay to give the transcription longer timing buffer.
 

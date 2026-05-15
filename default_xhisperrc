@@ -4,7 +4,14 @@
 
 # Transcription Settings:
 long-recording-threshold : 1000
+transcription-backend   : local
 transcription-prompt     : ""
+whisper-cpp-binary      : ~/.local/opt/whisper.cpp/build/bin/whisper-cli
+whisper-cpp-model       : ~/.local/share/xhisper/models/ggml-base.en.bin
+whisper-cpp-language    : en
+whisper-cpp-threads     : ""
+output-mode             : paste
+paste-chord             : auto
 
 # Paste Timing (seconds):
 non-ascii-initial-delay : 0.15 # Increase this if first character comes out wrong.
@@ -13,4 +20,3 @@ non-ascii-default-delay : 0.025
 # Silence Detection:
 silence-threshold  : -50
 silence-percentage : 95
-

@@ -2,11 +2,18 @@
 
 # xhisper v1.0
 # Dictate anywhere in Linux. Transcription at your cursor.
-# - Transcription via Groq Whisper
+# - Transcription via local whisper.cpp or Groq Whisper
 
 # Configuration (see default_xhisperrc or ~/.config/xhisper/xhisperrc):
 # - long-recording-threshold : threshold for using large vs turbo model (seconds)
+# - transcription-backend : "local" for whisper.cpp or "groq" for Groq API
 # - transcription-prompt : context words for better Whisper accuracy
+# - whisper-cpp-binary : path to whisper.cpp whisper-cli
+# - whisper-cpp-model : path to whisper.cpp ggml model
+# - whisper-cpp-language : spoken language, or "auto"
+# - whisper-cpp-threads : number of CPU threads for whisper.cpp
+# - output-mode : "paste" for fast clipboard paste or "type" for character typing
+# - paste-chord : "auto", "ctrl-v", or "ctrl-shift-v"
 # - silence-threshold : max volume in dB to consider silent (e.g., -50)
 # - silence-percentage : percentage of recording that must be silent (e.g., 95)
 # - non-ascii-initial-delay : sleep after first non-ASCII paste (seconds)
@@ -51,9 +58,13 @@ for arg in "$@"; do
   esac
 done
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Set binary paths based on local mode
 if [ "$LOCAL_MODE" -eq 1 ]; then
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  XHISPERTOOL="$SCRIPT_DIR/xhispertool"
+  XHISPERTOOLD="$SCRIPT_DIR/xhispertoold"
+elif [ -x "$SCRIPT_DIR/xhispertool" ] && [ -x "$SCRIPT_DIR/xhispertoold" ]; then
   XHISPERTOOL="$SCRIPT_DIR/xhispertool"
   XHISPERTOOLD="$SCRIPT_DIR/xhispertoold"
 else
@@ -67,7 +78,14 @@ PROCESS_PATTERN="pw-record.*$RECORDING"
 
 # Default configuration
 long_recording_threshold=1000
+transcription_backend="local"
 transcription_prompt=""
+whisper_cpp_binary="$HOME/.local/opt/whisper.cpp/build/bin/whisper-cli"
+whisper_cpp_model="$HOME/.local/share/xhisper/models/ggml-base.en.bin"
+whisper_cpp_language="en"
+whisper_cpp_threads=""
+output_mode="paste"
+paste_chord="auto"
 silence_threshold=-50
 silence_percentage=95
 non_ascii_initial_delay=0.1
@@ -87,7 +105,14 @@ if [ -f "$CONFIG_FILE" ]; then
 
     case "$key" in
       long-recording-threshold) long_recording_threshold="$value" ;;
+      transcription-backend) transcription_backend="$value" ;;
       transcription-prompt) transcription_prompt="$value" ;;
+      whisper-cpp-binary) whisper_cpp_binary="$value" ;;
+      whisper-cpp-model) whisper_cpp_model="$value" ;;
+      whisper-cpp-language) whisper_cpp_language="$value" ;;
+      whisper-cpp-threads) whisper_cpp_threads="$value" ;;
+      output-mode) output_mode="$value" ;;
+      paste-chord) paste_chord="$value" ;;
       silence-threshold) silence_threshold="$value" ;;
       silence-percentage) silence_percentage="$value" ;;
       non-ascii-initial-delay) non_ascii_initial_delay="$value" ;;
@@ -95,6 +120,16 @@ if [ -f "$CONFIG_FILE" ]; then
     esac
   done < "$CONFIG_FILE"
 fi
+
+expand_path() {
+  local path="$1"
+  path="${path/#\~/$HOME}"
+  path="${path//\$HOME/$HOME}"
+  echo "$path"
+}
+
+whisper_cpp_binary="$(expand_path "$whisper_cpp_binary")"
+whisper_cpp_model="$(expand_path "$whisper_cpp_model")"
 
 # Auto-start daemon if not running
 if ! pgrep -x xhispertoold > /dev/null; then
@@ -159,6 +194,67 @@ paste() {
   press_wrap_key
 }
 
+active_window_class() {
+  if ! command -v hyprctl &> /dev/null; then
+    return 1
+  fi
+
+  hyprctl activewindow -j 2>/dev/null | sed -n 's/.*"class"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+}
+
+is_terminal_class() {
+  case "$(echo "$1" | tr '[:upper:]' '[:lower:]')" in
+    alacritty|foot|footclient|kitty|konsole|org.wezfurlong.wezterm|rio|st|tabby|terminator|termite|tilix|wezterm|xterm)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+paste_clipboard() {
+  case "$1" in
+    ctrl-shift-v)
+      "$XHISPERTOOL" terminal-paste
+      ;;
+    ctrl-v)
+      "$XHISPERTOOL" paste
+      ;;
+    auto)
+      if is_terminal_class "$(active_window_class)"; then
+        "$XHISPERTOOL" terminal-paste
+      else
+        "$XHISPERTOOL" paste
+      fi
+      ;;
+    *)
+      echo "Error: Unknown paste-chord '$1'" >&2
+      return 1
+      ;;
+  esac
+}
+
+output_text() {
+  local text="$1"
+
+  case "$output_mode" in
+    paste)
+      press_wrap_key
+      printf '%s' "$text" | $CLIP_COPY
+      paste_clipboard "$paste_chord"
+      press_wrap_key
+      ;;
+    type)
+      paste "$text"
+      ;;
+    *)
+      echo "Error: Unknown output-mode '$output_mode'" >&2
+      return 1
+      ;;
+  esac
+}
+
 delete_n_chars() {
   local n="$1"
   for ((i=0; i<n; i++)); do
@@ -204,18 +300,55 @@ logging_end_and_write_to_logfile() {
 transcribe() {
   local recording="$1"
   local logging_start=$(date +%s%N)
+  local transcription=""
 
-  # Use large model for longer recordings, turbo for short ones
-  local is_long_recording=$(echo "$(get_duration "$recording") > $long_recording_threshold" | bc -l)
-  local model=$([[ $is_long_recording -eq 1 ]] && echo "whisper-large-v3" || echo "whisper-large-v3-turbo")
+  case "$transcription_backend" in
+    local|whisper.cpp|whisper-cpp)
+      if [ ! -x "$whisper_cpp_binary" ]; then
+        echo "Error: whisper.cpp binary not found or not executable: $whisper_cpp_binary" >&2
+        return 1
+      fi
+      if [ ! -f "$whisper_cpp_model" ]; then
+        echo "Error: whisper.cpp model not found: $whisper_cpp_model" >&2
+        return 1
+      fi
 
-  local transcription=$(curl -s -X POST "https://api.groq.com/openai/v1/audio/transcriptions" \
-    -H "Authorization: Bearer $GROQ_API_KEY" \
-    -H "Content-Type: multipart/form-data" \
-    -F "file=@$recording" \
-    -F "model=$model" \
-    -F "prompt=$transcription_prompt" \
-    | jq -r '.text' | sed 's/^ //') # Transcription always returns a leading space, so remove it via sed
+      local whisper_args=(
+        -m "$whisper_cpp_model"
+        -f "$recording"
+        -nt
+        -np
+        -l "$whisper_cpp_language"
+      )
+
+      if [ -n "$whisper_cpp_threads" ]; then
+        whisper_args+=(-t "$whisper_cpp_threads")
+      fi
+
+      if [ -n "$transcription_prompt" ]; then
+        whisper_args+=(--prompt "$transcription_prompt")
+      fi
+
+      transcription=$("$whisper_cpp_binary" "${whisper_args[@]}" 2>> "$LOGFILE" | sed 's/^ //;s/[[:space:]]*$//')
+      ;;
+    groq)
+      # Use large model for longer recordings, turbo for short ones
+      local is_long_recording=$(echo "$(get_duration "$recording") > $long_recording_threshold" | bc -l)
+      local model=$([[ $is_long_recording -eq 1 ]] && echo "whisper-large-v3" || echo "whisper-large-v3-turbo")
+
+      transcription=$(curl -s -X POST "https://api.groq.com/openai/v1/audio/transcriptions" \
+        -H "Authorization: Bearer $GROQ_API_KEY" \
+        -H "Content-Type: multipart/form-data" \
+        -F "file=@$recording" \
+        -F "model=$model" \
+        -F "prompt=$transcription_prompt" \
+        | jq -r '.text' | sed 's/^ //') # Transcription always returns a leading space, so remove it via sed
+      ;;
+    *)
+      echo "Error: Unknown transcription-backend '$transcription_backend'" >&2
+      return 1
+      ;;
+  esac
 
   logging_end_and_write_to_logfile "Transcription" "$transcription" "$logging_start"
 
@@ -223,6 +356,10 @@ transcribe() {
 }
 
 # Main
+
+# When launched by a modifier keybind, give the compositor time to observe the
+# modifier release before xhisper injects status text.
+sleep 0.35
 
 # Find recording process, if so then kill
 if pgrep -f "$PROCESS_PATTERN" > /dev/null; then
@@ -242,12 +379,12 @@ if pgrep -f "$PROCESS_PATTERN" > /dev/null; then
   TRANSCRIPTION=$(transcribe "$RECORDING")
   delete_n_chars 17 # "(transcribing...)"
 
-  paste "$TRANSCRIPTION"
+  output_text "$TRANSCRIPTION"
 
   rm -f "$RECORDING"
 else
   # No recording running, so start
   sleep 0.2
   paste "(recording...)"
-  pw-record --channels=1 --rate=16000 "$RECORDING"
+  pw-record --channels=1 --rate=16000 "$RECORDING" >/tmp/xhisper-pw-record.log 2>&1 &
 fi
