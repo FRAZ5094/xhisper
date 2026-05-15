@@ -108,10 +108,10 @@ The Linux binary does not run directly on macOS because it uses PipeWire and `/d
 ### Dependencies
 
 ```sh
-brew install cmake ffmpeg git
+brew install cmake ffmpeg git hammerspoon
 ```
 
-Use a hotkey runner such as Hammerspoon, Raycast, Shortcuts, Automator, or Karabiner.
+Hammerspoon is the recommended hotkey runner for this setup. It is a developer-friendly macOS automation tool with global hotkeys and shell command support.
 
 ### Install whisper.cpp
 
@@ -124,7 +124,7 @@ cmake --build ~/.local/opt/whisper.cpp/build -j"$(sysctl -n hw.ncpu)" --config R
 ln -sf ~/.local/opt/whisper.cpp/models/ggml-base.en.bin ~/.local/share/xhisper/models/ggml-base.en.bin
 ```
 
-### Minimal macOS script
+### Minimal macOS command
 
 Create `~/bin/xhisper-macos`:
 
@@ -164,7 +164,32 @@ ffmpeg -f avfoundation -list_devices true -i ""
 
 Then update `-i ":0"` in the script.
 
-Bind `~/bin/xhisper-macos` in your hotkey tool. Press once to start recording, press again to stop, transcribe, copy, and paste.
+### Hammerspoon global hotkey
+
+Start Hammerspoon once, then grant Accessibility permissions when macOS asks. If it does not ask automatically, open System Settings and enable Hammerspoon under Privacy & Security > Accessibility.
+
+Create or edit `~/.hammerspoon/init.lua`:
+
+```lua
+local xhisper = os.getenv("HOME") .. "/bin/xhisper-macos"
+
+hs.hotkey.bind({"cmd", "alt"}, "D", function()
+  hs.execute(xhisper .. " >/tmp/xhisper-macos-hotkey.log 2>&1 &")
+end)
+```
+
+Reload Hammerspoon from its menu bar icon, or run:
+
+```sh
+open -a Hammerspoon
+```
+
+Now press `Command+Option+D` anywhere in macOS:
+
+- first press starts recording
+- second press stops recording, transcribes, copies, and pastes
+
+If `Command+Option+D` conflicts with another app, change the modifiers or key in `hs.hotkey.bind`.
 
 ## Windows
 
