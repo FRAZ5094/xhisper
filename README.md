@@ -4,61 +4,29 @@
   <br><br>
 </div>
 
-Dictation at cursor for Linux.
+Dictation at cursor for Linux, with optional local transcription through [`whisper.cpp`](https://github.com/ggml-org/whisper.cpp).
 
-This fork can transcribe locally with [`whisper.cpp`](https://github.com/ggml-org/whisper.cpp), so a Groq API key is optional.
+This fork defaults to local `whisper.cpp` transcription, so a Groq API key is not required. Groq is still available by setting `transcription-backend : groq`.
 
-## Installation
+## Linux
 
 ### Dependencies
 
-<details>
-<summary>Arch Linux / Manjaro</summary>
-<pre><code>sudo pacman -S pipewire jq curl ffmpeg gcc make cmake git bc</code></pre>
-</details>
-
-<details>
-<summary>Debian / Ubuntu / Linux Mint</summary>
-<pre><code>sudo apt update
-sudo apt install pipewire jq curl ffmpeg gcc make cmake git bc</code></pre>
-</details>
-
-<details>
-<summary>Fedora / RHEL / AlmaLinux / Rocky</summary>
-<pre><code>sudo dnf install -y pipewire pipewire-utils jq curl ffmpeg gcc make cmake git bc</code></pre>
-</details>
-
-<details>
-<summary>OpenSUSE (Leap / Tumbleweed)</summary>
-<pre><code>sudo zypper refresh
-sudo zypper install pipewire jq curl ffmpeg gcc make cmake git bc</code></pre>
-</details>
-
-<details>
-<summary>Void Linux</summary>
-<pre><code>sudo xbps-install -S
-sudo xbps-install pipewire jq curl ffmpeg gcc make cmake git bc</code></pre>
-</details>
-
-**Note:** `wl-clipboard` (Wayland) or `xclip` (X11) is required for clipboard paste output.
-
-### Setup
-
-1. **Add user to input group** to access `/dev/uinput`:
-```sh
-sudo usermod -aG input $USER
-```
-Then **log out and log back in** (restart is safer) for the group change to take effect.
-
-Check by running:
+Arch Linux / Manjaro:
 
 ```sh
-groups
+sudo pacman -S --needed pipewire wireplumber jq curl ffmpeg gcc make cmake git bc wl-clipboard
 ```
 
-You should see `input` in the output.
+Debian / Ubuntu / Linux Mint:
 
-2. **Local transcription with whisper.cpp**:
+```sh
+sudo apt update
+sudo apt install pipewire pipewire-audio-client-libraries wireplumber jq curl ffmpeg gcc make cmake git bc wl-clipboard
+```
+
+### Install whisper.cpp
+
 ```sh
 mkdir -p ~/.local/opt ~/.local/share/xhisper/models
 git clone https://github.com/ggml-org/whisper.cpp ~/.local/opt/whisper.cpp
@@ -68,111 +36,235 @@ cmake --build ~/.local/opt/whisper.cpp/build -j"$(nproc)" --config Release
 ln -sf ~/.local/opt/whisper.cpp/models/ggml-base.en.bin ~/.local/share/xhisper/models/ggml-base.en.bin
 ```
 
-For detailed Linux setup notes, see [`docs/linux-local-whisper.md`](docs/linux-local-whisper.md).
+### Install xhisper
 
-3. **Optional Groq API key** from [console.groq.com](https://console.groq.com) if you set `transcription-backend : groq`:
-```sh
-GROQ_API_KEY=<your_API_key>
-```
-
-4. Clone the repository and install:
 ```sh
 git clone --depth 1 https://github.com/FRAZ5094/xhisper.git
-cd xhisper && make
-sudo make install
+cd xhisper
+make
+make install PREFIX="$HOME/.local"
+mkdir -p ~/.config/xhisper
+cp default_xhisperrc ~/.config/xhisper/xhisperrc
 ```
 
-5. Bind `xhisper` binary to your favorite key:
+Make sure `~/.local/bin` is on your `PATH`.
 
-<details>
-<summary>keyd</summary>
+### uinput access
+
+xhisper uses `/dev/uinput` to type and paste at the cursor.
+
+```sh
+sudo usermod -aG input "$USER"
+```
+
+Log out and back in, or reboot. Then check:
+
+```sh
+groups
+```
+
+You should see `input`.
+
+If `/dev/uinput` exists but xhisper still cannot open it, make sure the running kernel and installed modules match:
+
+```sh
+uname -r
+ls /lib/modules
+```
+
+On rolling distributions, this often means rebooting after a kernel update.
+
+### Hyprland keybind
+
+Use `bindr` so the command runs after the Super key is released:
 
 ```ini
-[main]
-capslock = layer(dictate)
-
-[dictate:C]
-d = macro(xhisper)
+bindr = $mainMod, d, exec, /home/YOUR_USER/.local/bin/xhisper
 ```
-</details>
 
-<details>
-<summary>sxhkd</summary>
+Reload Hyprland:
 
+```sh
+hyprctl reload
 ```
+
+Other Linux bind examples:
+
+```ini
+# i3 / sway
+bindsym $mod+d exec xhisper
+```
+
+```text
+# sxhkd
 super + d
     xhisper
 ```
-</details>
 
-<details>
-<summary>i3 / sway</summary>
+## macOS
 
-```
-bindsym $mod+d exec xhisper
-```
-</details>
+The Linux binary does not run directly on macOS because it uses PipeWire and `/dev/uinput`. The same local dictation workflow can be set up with `whisper.cpp`, `ffmpeg`, `pbcopy`, and a hotkey tool.
 
-<details>
-<summary>Hyprland</summary>
-
-```
-bindr = $mainMod, d, exec, /home/YOUR_USER/.local/bin/xhisper
-```
-</details>
-
-<details>
-<summary>Gnome</summary>
+### Dependencies
 
 ```sh
-# In your terminal:
-
-name="xhisper"
-binding="<CTRL><SHIFT>X"
-action="/usr/local/bin/xhisper"
-
-media_keys=org.gnome.settings-daemon.plugins.media-keys
-custom_kbd=org.gnome.settings-daemon.plugins.media-keys.custom-keybinding
-kbd_path=/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/$name/
-new_bindings=`gsettings get $media_keys custom-keybindings | sed -e"s>'\]>','$kbd_path']>"| sed -e"s>@as \[\]>['$kbd_path']>"`
-gsettings set $media_keys custom-keybindings "$new_bindings"
-gsettings set $custom_kbd:$kbd_path name "$name"
-gsettings set $custom_kbd:$kbd_path binding "$binding"
-gsettings set $custom_kbd:$kbd_path command "$action"
+brew install cmake ffmpeg git
 ```
-</details>
 
----
+Use a hotkey runner such as Hammerspoon, Raycast, Shortcuts, Automator, or Karabiner.
+
+### Install whisper.cpp
+
+```sh
+mkdir -p ~/.local/opt ~/.local/share/xhisper/models
+git clone https://github.com/ggml-org/whisper.cpp ~/.local/opt/whisper.cpp
+cmake -S ~/.local/opt/whisper.cpp -B ~/.local/opt/whisper.cpp/build -DCMAKE_BUILD_TYPE=Release
+cmake --build ~/.local/opt/whisper.cpp/build -j"$(sysctl -n hw.ncpu)" --config Release
+~/.local/opt/whisper.cpp/models/download-ggml-model.sh base.en
+ln -sf ~/.local/opt/whisper.cpp/models/ggml-base.en.bin ~/.local/share/xhisper/models/ggml-base.en.bin
+```
+
+### Minimal macOS script
+
+Create `~/bin/xhisper-macos`:
+
+```sh
+#!/bin/zsh
+set -e
+
+recording="/tmp/xhisper-macos.wav"
+state="/tmp/xhisper-macos.pid"
+whisper="$HOME/.local/opt/whisper.cpp/build/bin/whisper-cli"
+model="$HOME/.local/share/xhisper/models/ggml-base.en.bin"
+
+if [ -f "$state" ] && kill -0 "$(cat "$state")" 2>/dev/null; then
+  kill "$(cat "$state")"
+  rm -f "$state"
+  sleep 0.3
+  text="$("$whisper" -m "$model" -f "$recording" -nt -np -l en | sed 's/^ //;s/[[:space:]]*$//')"
+  printf '%s' "$text" | pbcopy
+  osascript -e 'tell application "System Events" to keystroke "v" using command down'
+else
+  ffmpeg -y -f avfoundation -i ":0" -ar 16000 -ac 1 -c:a pcm_s16le "$recording" >/tmp/xhisper-macos-record.log 2>&1 &
+  echo $! > "$state"
+fi
+```
+
+Make it executable:
+
+```sh
+chmod +x ~/bin/xhisper-macos
+```
+
+List macOS audio devices if `:0` is not your microphone:
+
+```sh
+ffmpeg -f avfoundation -list_devices true -i ""
+```
+
+Then update `-i ":0"` in the script.
+
+Bind `~/bin/xhisper-macos` in your hotkey tool. Press once to start recording, press again to stop, transcribe, copy, and paste.
+
+## Windows
+
+The Linux binary does not run directly on Windows because it uses PipeWire and `/dev/uinput`. The same workflow can be built with `whisper.cpp`, `ffmpeg`, the Windows clipboard, and AutoHotkey.
+
+### Dependencies
+
+Required:
+
+- Git
+- CMake
+- C++ compiler, usually Visual Studio Build Tools
+- FFmpeg
+- AutoHotkey v2
+
+Without admin rights, use portable/prebuilt versions where possible. `whisper.cpp` itself can run from a user directory, but building it requires a C++ toolchain. If a compiler and CMake are already installed, admin rights are not required.
+
+### Install whisper.cpp
+
+```powershell
+git clone https://github.com/ggml-org/whisper.cpp "$env:USERPROFILE\.local\opt\whisper.cpp"
+cmake -S "$env:USERPROFILE\.local\opt\whisper.cpp" -B "$env:USERPROFILE\.local\opt\whisper.cpp\build" -DCMAKE_BUILD_TYPE=Release
+cmake --build "$env:USERPROFILE\.local\opt\whisper.cpp\build" --config Release
+```
+
+Download a model:
+
+```powershell
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.local\share\xhisper\models"
+Invoke-WebRequest `
+  -Uri "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin" `
+  -OutFile "$env:USERPROFILE\.local\share\xhisper\models\ggml-base.en.bin"
+```
+
+### AutoHotkey sketch
+
+Create an AutoHotkey v2 script and adjust the microphone name and `whisper-cli.exe` path if needed:
+
+```autohotkey
+#Requires AutoHotkey v2.0
+
+recording := A_Temp "\xhisper-windows.wav"
+pidFile := A_Temp "\xhisper-windows.pid"
+whisper := A_UserProfile "\.local\opt\whisper.cpp\build\bin\Release\whisper-cli.exe"
+model := A_UserProfile "\.local\share\xhisper\models\ggml-base.en.bin"
+
+#d:: {
+    global recording, pidFile, whisper, model
+
+    if FileExist(pidFile) {
+        pid := Trim(FileRead(pidFile))
+        ProcessClose(pid)
+        FileDelete(pidFile)
+        Sleep(300)
+
+        cmd := Format('"{1}" -m "{2}" -f "{3}" -nt -np -l en', whisper, model, recording)
+        shell := ComObject("WScript.Shell")
+        exec := shell.Exec(cmd)
+        text := Trim(exec.StdOut.ReadAll())
+        A_Clipboard := text
+        Send("^v")
+    } else {
+        cmd := Format('ffmpeg -y -f dshow -i audio="YOUR MICROPHONE NAME" -ar 16000 -ac 1 -c:a pcm_s16le "{1}"', recording)
+        pid := Run(cmd, , "Hide")
+        FileAppend(pid, pidFile)
+    }
+}
+```
+
+List DirectShow audio devices:
+
+```powershell
+ffmpeg -list_devices true -f dshow -i dummy
+```
+
+Replace `YOUR MICROPHONE NAME` with the exact microphone name.
 
 ## Usage
 
-Simply run `xhisper` twice (via your favorite keybinding):
-- **First run**: Starts recording
-- **Second run**: Stops and transcribes
+Run the command twice or use your keybind:
 
-The transcription will be pasted or typed at your cursor position.
+- First run: starts recording
+- Second run: stops, transcribes, and pastes at the cursor
 
-**View logs:**
+Linux:
+
+```sh
+xhisper
+xhisper
+```
+
+View logs:
+
 ```sh
 xhisper --log
 ```
 
-**Non-QWERTY layouts:**
-
-For non-QWERTY layouts (e.g. Dvorak, International), set up an input switch key to QWERTY (e.g. rightalt). Then instead of binding to `xhisper`, bind to:
-```sh
-xhisper --<your-input-switch-key>
-```
-
-**Available input switch keys:** `--leftalt`, `--rightalt`, `--leftctrl`, `--rightctrl`, `--leftshift`, `--rightshift`, `--super`
-
-Key chords (like ctrl-space) not available yet.
-
----
-
 ## Configuration
 
-Configuration is read from `~/.config/xhisper/xhisperrc`:
+Linux configuration is read from `~/.config/xhisper/xhisperrc`:
 
 ```sh
 mkdir -p ~/.config/xhisper
@@ -192,22 +284,32 @@ paste-chord           : auto
 
 Use `output-mode : paste` for fast long-form dictation. Use `output-mode : type` to restore character-by-character typing.
 
-## macOS
+Optional Groq mode:
 
-The Linux xhisper app does not run directly on macOS because it depends on PipeWire, `/dev/uinput`, and Linux desktop keybinds. The local `whisper.cpp` transcription approach is portable, though. See [`docs/macos-local-whisper.md`](docs/macos-local-whisper.md) for an equivalent macOS workflow using `ffmpeg`, `pbcopy`, and a hotkey tool.
+```ini
+transcription-backend : groq
+```
 
-## Windows
+Then add your Groq key to `~/.env`:
 
-The Linux xhisper app does not run directly on Windows because it depends on PipeWire and `/dev/uinput`. `whisper.cpp` itself can run on Windows, and the same dictation workflow can be built with Windows audio capture, clipboard paste, and a hotkey tool. See [`docs/windows-local-whisper.md`](docs/windows-local-whisper.md).
+```sh
+GROQ_API_KEY=<your_API_key>
+```
 
 ## Troubleshooting
 
-**Terminal Applications**: With `paste-chord : auto`, common terminal emulators use Ctrl+Shift+V and other apps use Ctrl+V. If detection is wrong, set `paste-chord : ctrl-v` or `paste-chord : ctrl-shift-v`.
+Terminal applications: with `paste-chord : auto`, common terminal emulators use Ctrl+Shift+V and other apps use Ctrl+V. If detection is wrong, set `paste-chord : ctrl-v` or `paste-chord : ctrl-shift-v`.
 
-**Non-ASCII Transcription**: Increase non-ascii-*-delay to give the transcription longer timing buffer.
+Non-QWERTY layouts: set up an input switch key to QWERTY, then bind to:
+
+```sh
+xhisper --rightalt
+```
+
+Available input switch keys: `--leftalt`, `--rightalt`, `--leftctrl`, `--rightctrl`, `--leftshift`, `--rightshift`, `--super`.
 
 ---
 
 <p align="center">
-  <em>Low complexity dictation for Linux</em>
+  <em>Low complexity dictation</em>
 </p>
